@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js"}}</script>
+<style>
+html,body{margin:0;background:#000;overflow:hidden;font-family:sans-serif;color:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
+#hud{position:fixed;top:12px;left:14px;font-size:18px;text-shadow:0 0 6px #000;white-space:pre}
+#big{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font-size:44px;text-align:center;text-shadow:0 0 12px #000;pointer-events:none}
+#hurt{position:fixed;inset:0;pointer-events:none;box-shadow:inset 0 0 200px 60px #f00;opacity:0}
+#menu{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#000d;text-align:center;z-index:5}
+button,input{font-size:20px;padding:10px 18px;border-radius:8px;border:0}
+input{width:110px;text-align:center;text-transform:uppercase}
+button{background:#b00;color:#fff;cursor:pointer}
+#ui{display:none}
+#stick{position:fixed;left:30px;bottom:30px;width:130px;height:130px;border-radius:50%;background:#fff2}
+#knob{position:absolute;left:45px;top:45px;width:40px;height:40px;border-radius:50%;background:#fff7}
+#bE,#bF{position:fixed;right:30px;width:70px;height:70px;border-radius:50%;opacity:.75;padding:0}
+#bE{bottom:30px}#bF{bottom:120px}
+</style></head>
+<body>
+<div id="hud"></div><div id="big"></div><div id="hurt"></div>
+<div id="ui"><div id="stick"><div id="knob"></div></div><button id="bE">E</button><button id="bF">Light</button></div>
+<div id="menu">
+  <h1>BLOOD MOON HOLLOW</h1>
+  <button id="hostBtn">Host a night</button>
+  <div><input id="code" maxlength="4" placeholder="CODE"> <button id="joinBtn">Join</button></div>
+  <p id="msg">PC: WASD move, mouse look, F flashlight, E interact, click to lock mouse.<br>Phone: left stick moves, drag right side to look.</p>
+</div>
+<script type="module">
+import * as THREE from 'three';
+const hud=document.getElementById('hud'),big=document.getElementById('big'),hurt=document.getElementById('hurt');
+const menu=document.getElementById('menu'),msg=document.getElementById('msg'),codeEl=document.getElementById('code');
+codeEl.value=location.hash.slice(1);
+
+// same code = same village for everyone
+const rng=s=>{let a=s>>>0;return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}};
+const hash=s=>{let h=2166136261;for(const ch of s){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return h>>>0};
+
+// ---------- 3D scene ----------
+const isTouch=matchMedia('(pointer:coarse)').matches;
+const R=new THREE.WebGLRenderer({antialias:!isTouch});
+R.setPixelRatio(Math.min(devicePixelRatio,isTouch?1.5:2));R.setSize(innerWidth,innerHeight);
+document.body.prepend(R.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x05030a);scene.fog=new THREE.FogExp2(0x0a0610,0.035);
+const cam=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,200);scene.add(cam);
+onresize=()=>{R.setSize(innerWidth,innerHeight);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()};
+scene.add(new THREE.AmbientLight(0x221133,0.6));
+const moon=new THREE.DirectionalLight(0x6a4aff,0.35);moon.position.set(30,60,20);scene.add(moon);
+const torch=new THREE.SpotLight(0xffeecc,3,35,0.45,0.5);torch.position.set(0,0,0);
+cam.add(torch);torch.target.position.set(0,0,-1);cam.add(torch.target);
+
+const M=(c,e)=>new THREE.MeshStandardMaterial({color:c,roughness:.9,emissive:e||0});
+let obs=[],code='';
+function buildWorld(){
+  const r=rng(hash(code));
+  const g=new THREE.Mesh(new THREE.PlaneGeometry(1000,1000),M(0x1a2418));g.rotation.x=-Math.PI/2;scene.add(g);
+  for(let i=0;i<120;i++){
+    const x=(r()-.5)*700,z=(r()-.5)*700;if(Math.hypot(x,z)<16)continue;
+    const w=6+r()*5,d=6+r()*5,h=4+r()*3;
+    const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),M(0x3a3340));b.position.set(x,h/2,z);scene.add(b);
+    const rf=new THREE.Mesh(new THREE.ConeGeometry(Math.max(w,d)*.78,3,4),M(0x2a1818));rf.position.set(x,h+1.5,z);rf.rotation.y=Math.PI/4;scene.add(rf);
+    obs.push({x,z,r:Math.max(w,d)*.62});
+  }
+  const N=900,m4=new THREE.Matrix4();
+  const trunk=new THREE.InstancedMesh(new THREE.CylinderGeometry(.25,.35,3),M(0x2b1d12),N);
+  const leaf=new THREE.InstancedMesh(new THREE.ConeGeometry(1.6,5,6),M(0x0f2a14),N);
+  trunk.frustumCulled=leaf.frustumCulled=false;
+  for(let k=0;k<N;){
+    const x=(r()-.5)*720,z=(r()-.5)*720;if(Math.hypot(x,z)<12)continue;
+    m4.setPosition(x,1.5,z);trunk.setMatrixAt(k,m4);
+    m4.setPosition(x,5,z);leaf.setMatrixAt(k,m4);
+    obs.push({x,z,r:.7});k++;
+  }
+  scene.add(trunk,leaf);
+  const al=new THREE.Mesh(new THREE.CylinderGeometry(1.6,2,1.2,8),M(0x555560));al.position.y=.6;scene.add(al);
+  const fl=new THREE.Mesh(new THREE.SphereGeometry(.4),M(0x440000,0xff2200));fl.position.y=1.5;scene.add(fl);
+  const pl=new THREE.PointLight(0xff3311,2,18);pl.position.y=2;scene.add(pl);
+}
+function relicPos(n){
+  const r=rng(hash(code+n));
+  return Array.from({length:4},()=>{let x,z;do{const a=r()*6.283,d=40+r()*250;x=Math.cos(a)*d;z=Math.sin(a)*d}
+    while(obs.some(o=>Math.hypot(o.x-x,o.z-z)<o.r+2));return[x,z]});
+}
+const relicMeshes=[];let lastN=-1,rp=[];
+function placeRelics(n){
+  relicMeshes.forEach(m=>scene.remove(m));relicMeshes.length=0;rp=relicPos(n);
+  rp.forEach(p=>{
+    const m=new THREE.Group();
+    const o=new THREE.Mesh(new THREE.IcosahedronGeometry(.35),M(0x113344,0x33ccff));o.position.y=1.2;m.add(o);
+    const beam=new THREE.Mesh(new THREE.CylinderGeometry(.08,.08,30),new THREE.MeshBasicMaterial({color:0x33ccff,transparent:true,opacity:.25}));beam.position.y=15;m.add(beam);
+    m.position.set(p[0],0,p[1]);scene.add(m);relicMeshes.push(m);
+  });
+}
+const vamp=new THREE.Group();
+const vb=new THREE.Mesh(new THREE.CylinderGeometry(.35,.6,2.2),M(0x050505));vb.position.y=1.1;vamp.add(vb);
+[-.15,.15].forEach(dx=>{const e=new THREE.Mesh(new THREE.SphereGeometry(.07),new THREE.MeshBasicMaterial({color:0xff0000}));e.position.set(dx,1.9,.3);vamp.add(e)});
+scene.add(vamp);
+const avatars={};const COLS=[0x44aaff,0x44ff88,0xffaa44,0xff44ff];
+
+// ---------- state ----------
+let role=null,peer,hostConn,conns=[],myId='host';
+let P={},S={},snap={n:0,t:0,s:'play',c:0,r:[0,0,0,0],v:[160,160],p:[]};
+const me={x:0,z:6,ry:0,pitch:0,lit:true};
+const keys={};
+addEventListener('keydown',e=>{keys[e.code]=true;
+  if(e.code=='KeyF')me.lit=!me.lit;
+  if(e.code=='KeyE')send({e:1})});
+addEventListener('keyup',e=>keys[e.code]=false);
+R.domElement.onclick=()=>{if(!isTouch)R.domElement.requestPointerLock()};
+addEventListener('mousemove',e=>{if(document.pointerLockElement){me.ry-=e.movementX*.0025;me.pitch=Math.max(-1.4,Math.min(1.4,me.pitch-e.movementY*.0025))}});
+
+// ---------- host (referee) ----------
+const T=420,dist=(a,b,c,d)=>Math.hypot(a-c,b-d);
+function newNight(n){
+  S={n,t:T,s:'play',w:0,r:[0,0,0,0],c:0,v:[160,160]};
+  let i=0;for(const id in P){Object.assign(P[id],{hp:100,x:Math.cos(i)*5,z:Math.sin(i)*5});i++}
+}
+function handle(id,m){
+  const q=P[id];if(!q)return;
+  if(m.x!==undefined){q.x=m.x;q.z=m.z;q.ry=m.ry;q.lit=m.lit}
+  if(m.e&&S.s=='play'&&q.hp>0){
+    const i=rp.findIndex((p,k)=>!S.r[k]&&dist(p[0],p[1],q.x,q.z)<3);
+    if(i>=0){S.r[i]=1;S.c++}
+    else if(S.c==4&&dist(0,0,q.x,q.z)<5){S.s='win';S.w=8}
+  }
+}
+function hostStep(dt){
+  if(S.s!='play'){S.w-=dt;if(S.w<0)newNight(S.s=='win'?S.n+1:S.n);return}
+  S.t-=dt;
+  const al=Object.values(P).filter(q=>q.hp>0);
+  if(S.t<=0||!al.length){S.s='lose';S.w=8;return}
+  if(S.t<T-20){
+    const q=al.reduce((a,b)=>dist(a.x,a.z,S.v[0],S.v[1])<dist(b.x,b.z,S.v[0],S.v[1])?a:b);
+    let sp=4+Math.min(S.n,10)*.2;
+    for(const o of al){
+      if(!o.lit)continue;
+      const dx=S.v[0]-o.x,dz=S.v[1]-o.z,d=Mat h.hypot(dx,dz);
+      const fx=-Math.sin(o.ry),fz=-Math.cos(o.ry);
+      if(d<18&&(dx*fx+dz*fz)/d>.9)sp*=.35;
+    }
+    const dx=q.x-S.v[0],dz=q.z-S.v[1],d=Math.hypot(dx,dz)||1;
+    S.v[0]+=dx/d*sp*dt;S.v[1]+=dz/d*sp*dt;
+    if(d<1.5)q.hp-=34*dt;
+  }
+}
+function makeSnap(){
+  return{n:S.n,t:S.t,s:S.s,c:S.c,r:S.r,v:S.v,p:Object.keys(P).map(i=>[i,P[i].x,P[i].z,P[i].ry,P[i].hp,P[i].lit])};
+}
+function startHost(){
+  code=Math.random().toString(36).slice(2,6).toUpperCase();
+  peer=new Peer('hollow-'+code);
+  peer.on('error',e=>{if(e.type=='unavailable-id')startHost();else msg.textContent='Error: '+e.type});
+  peer.on('open',()=>{
+    role='host';history.replaceState(null,'','#'+code);
+    buildWorld();P.host={x:0,z:6,ry:0,hp:100,lit:true};newNight(1);menu.style.display='none';
+    setInterval(()=>{hostStep(1/30);handle('host',{x:me.x,z:me.z,ry:me.ry,lit:me.lit});snap=makeSnap();conns.forEach(k=>k.open&&k.send(snap))},33);
+  });
+  peer.on('connection',cn=>{
+    cn.on('open',()=>{conns.push(cn);P[cn.peer]={x:0,z:6,ry:0,hp:100,lit:true}});
+    cn.on('data',d=>handle(cn.peer,d));
+    cn.on('close',()=>{delete P[cn.peer];conns=conns.filter(k=>k!=cn)});
+  });
+}
+function startJoin(){
+  code=codeEl.value.trim().toUpperCase();if(code.length<4){msg.textContent='Enter the 4-letter code';return}
+  msg.textContent='Connecting...';peer=new Peer();
+  peer.on('open',id=>{myId=id;hostConn=peer.connect('hollow-'+code);
+    hostConn.on('open',()=>{role='client';buildWorld();menu.style.display='none'});
+    hostConn.on('data',d=>snap=d);
+    hostConn.on('close',()=>{alert('Host left');location.reload()})});
+  peer.on('error',()=>msg.textContent='Room not found. Check the code.');
+}
+function send(m){if(role=='host')handle('host',m);else if(hostConn&&hostConn.open)hostConn.send(m)}
+document.getElementById('hostBtn').onclick=startHost;
+document.getElementById('joinBtn').onclick=startJoin;
+setInterval(()=>{if(role=='client')send({x:me.x,z:me.z,ry:me.ry,lit:me.lit})},50);
+
+// ---------- mobile controls ----------
+const joy={x:0,y:0};let stickId=null,lookId=null,lx=0,ly=0;
+const stick=document.getElementById('stick'),knob=document.getElementById('knob');
+if(isTouch){
+  document.getElementById('ui').style.display='block';
+  const bE=document.getElementById('bE'),bF=document.getElementById('bF');
+  bE.addEventListener('touchstart',e=>{e.preventDefault();send({e:1})});
+  bF.addEventListener('touchstart',e=>{e.preventDefault();me.lit=!me.lit});
+  addEventListener('touchstart',e=>{
+    for(const t of e.changedTouches){
+      if(e.target.closest('#bE,#bF'))continue;
+      if(stick.contains(e.target))stickId=t.identifier;
+      else if(lookId===null){lookId=t.identifier;lx=t.clientX;ly=t.clientY}
+    }
+  },{passive:false});
+  addEventListener('touchmove',e=>{
+    e.preventDefault();
+    for(const t of e.changedTouches){
+      if(t.identifier===stickId){
+        const b=stick.getBoundingClientRect();
+        let dx=(t.clientX-b.left-65)/50,dy=(t.clientY-b.top-65)/50;
+        const m=Math.hypot(dx,dy);if(m>1){dx/=m;dy/=m}
+        joy.x=dx;joy.y=dy;knob.style.transform=`translate(${dx*40}px,${dy*40}px)`;
+      }else if(t.identifier===lookId){
+        me.ry-=(t.clientX-lx)*.005;
+        me.pitch=Math.max(-1.4,Math.min(1.4,me.pitch-(t.clientY-ly)*.005));
+        lx=t.clientX;ly=t.clientY;
+      }
+    }
+  },{passive:false});
+  addEventListener('touchend',e=>{
+    for(const t of e.changedTouches){
+      if(t.identifier===stickId){stickId=null;joy.x=joy.y=0;knob.style.transform=''}
+      if(t.identifier===lookId)lookId=null;
+    }
+  });
+}
+
+// ---------- heartbeat ----------
+let ac;addEventListener('click',()=>{ac=ac||new AudioContext()});
+addEventListener('touchend',()=>{ac=ac||new AudioContext()});
+function thump(){
+  const d=dist(snap.v[0],snap.v[1],me.x,me.z);
+  if(ac&&d<40){const o=ac.createOscillator(),g=ac.createGain();o.frequency.value=55;o.connect(g);g.connect(ac.destination);
+    g.gain.setValueAtTime(.6*(1-d/40),ac.currentTime);g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+.25);o.start();o.stop(ac.currentTime+.3)}
+  setTimeout(thump,300+Math.min(d,40)*25);
+}
+thump();
+
+// ---------- main loop ----------
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(.05,(now-last)/1000);last=now;
+  const mine=snap.p.find(q=>q[0]==myId),hp=mine?mine[4]:100;
+  if(role&&hp>0&&snap.s=='play'){
+    const sp=(keys.ShiftLeft||Math.hypot(joy.x,joy.y)>.95?7:4.5)*dt;
+    const f=(keys.KeyW?1:0)-(keys.KeyS?1:0)-joy.y,s=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x;
+    const fx=-Math.sin(me.ry),fz=-Math.cos(me.ry),rx=Math.cos(me.ry),rz=-Math.sin(me.ry);
+    me.x+=(fx*f+rx*s)*sp;me.z+=(fz*f+rz*s)*sp;
+    obs.forEach(o=>{const dx=me.x-o.x,dz=me.z-o.z,d=Math.hypot(dx,dz);if(d<o.r+.4){me.x=o.x+dx/d*(o.r+.4);me.z=o.z+dz/d*(o.r+.4)}});
+    me.x=Math.max(-480,Math.min(480,me.x));me.z=Math.max(-480,Math.min(480,me.z));
+  }
+  cam.position.set(me.x,hp>0?1.7:.5,me.z);cam.rotation.set(me.pitch,me.ry,0,'YXZ');
+  torch.visible=me.lit&&hp>0;
+  if(snap.n!=lastN&&role){lastN=snap.n;placeRelics(snap.n)}
+  relicMeshes.forEach((m,i)=>{m.visible=!snap.r[i];m.children[0].rotation.y+=dt*2});
+  vamp.position.x+=(snap.v[0]-vamp.position.x)*.2;vamp.position.z+=(snap.v[1]-vamp.position.z)*.2;
+  vamp.lookAt(me.x,0,me.z);
+  snap.p.forEach((q,i)=>{
+    if(q[0]==myId)return;
+    let a=avatars[q[0]];
+    if(!a){a=avatars[q[0]]=new THREE.Mesh(new THREE.CapsuleGeometry(.35,1.1),M(COLS[Object.keys(avatars).length%4],0x111111));scene.add(a)}
+    a.position.x+=(q[1]-a.position.x)*.25;a.position.z+=(q[2]-a.position.z)*.25;a.position.y=q[4]>0?1:.4;a.rotation.y=q[3];
+  });
+  const live=rp.filter((p,i)=>!snap.r[i]);
+  const nd=live.length?Math.round(Math.min(...live.map(p=>dist(p[0],p[1],me.x,me.z)))):0;
+  const left=Math.max(0,snap.t|0);
+  hud.textContent=`Night ${snap.n}   Dawn in ${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}\nRelics ${snap.c}/4   Players ${snap.p.length}   Room ${code}\n`+
+    (snap.c==4?'Return to the altar and press E!':'Nearest relic: '+nd+'m. Press E near it.');
+  hurt.style.opacity=1-hp/100;
+  big.textContent=snap.s=='win'?'RITUAL COMPLETE. Next night...':snap.s=='lose'?'THE HOLLOW CLAIMS YOU. Restarting...':(hp<=0?'You are down. Watch your friends.':'');
+  R.render(scene,cam);requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script></body></html>
